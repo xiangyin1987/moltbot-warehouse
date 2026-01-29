@@ -14,7 +14,7 @@
     "paths": {
       "clawdbot/plugin-sdk": ["./src/moltbot-plugin-sdk.d.ts"]
     },
-    "ignoreDeprecations": "6.0"
+    
   },
   "include": ["index.ts", "src/**/*.ts"],
   "exclude": ["node_modules", "dist"]

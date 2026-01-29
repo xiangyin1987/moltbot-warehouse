@@ -19,6 +19,7 @@ export interface JingmeAccountConfig {
   appKey?: string;
   appSecret?: string;
   robotId?: string;
+  openTeamId?: string;
   environment?: JingmeEnvironment;
   webhookPort?: number;
   verificationToken?: string;
@@ -42,6 +43,7 @@ export interface ResolvedJingmeAccount {
   appKey: string;
   appSecret: string;
   robotId: string;
+   openTeamId: string;
   environment: JingmeEnvironment;
   webhookPort: number;
   verificationToken?: string;

@@ -78,7 +78,7 @@ async function getAccessToken(account: ResolvedJingmeAccount): Promise<string> {
   const teamTokenUrl = `${domain}/open-api/auth/v1/team_access_token`;
   const teamTokenBody = JSON.stringify({
     appAccessToken: appAccessToken,
-    openTeamId: 'd12f8db0bd4f51552e878c2cbfa0c020', // Use robotId as openTeamId
+    openTeamId: account.openTeamId,
   });
 
   const teamTokenResponse = await request(teamTokenUrl, {

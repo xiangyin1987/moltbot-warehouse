@@ -1,12 +1,26 @@
 {
-  "name": "@clawdbot/jingme",
+  "name": "@jd/clawdbot-jingme",
   "version": "0.0.1",
   "type": "module",
   "description": "Clawdbot JingMe (京me) channel plugin with enhanced features, improved error handling, and security",
   "clawdbot": {
     "extensions": [
-      "./index.ts"
+      "./dist/index.js"
     ]
+  },
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",
+    "prepublishOnly": "npm run build"
+  },
+  "publishConfig": {
+    "registry": "http://registry.m.jd.com/",
+    "access": "restricted"
   },
   "keywords": [
     "clawdbot",
@@ -30,8 +44,8 @@
     "node": ">=18.0.0"
   },
   "files": [
-    "README.md",
-    "LICENSE",
-    "CHANGELOG.md"
+    "dist",
+    "CHANGELOG.md",
+    "README.md"
   ]
 }

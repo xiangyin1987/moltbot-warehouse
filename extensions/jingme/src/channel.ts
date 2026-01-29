@@ -77,6 +77,9 @@ function resolveAccount(
   const robotId =
     accountConfig.robotId ??
     (isDefault ? process.env.JINGME_ROBOT_ID : undefined);
+  const openTeamId =
+    accountConfig.openTeamId ??
+    (isDefault ? process.env.JINGME_OPEN_TEAM_ID : undefined);
   const verificationToken =
     accountConfig.verificationToken ??
     (isDefault ? process.env.JINGME_VERIFICATION_TOKEN : undefined);
@@ -86,7 +89,7 @@ function resolveAccount(
     DEFAULTS.encryptKey;
 
   const configured = Boolean(
-    appKey?.trim() && appSecret?.trim() && robotId?.trim(),
+    appKey?.trim() && appSecret?.trim() && robotId?.trim() && openTeamId?.trim(),
   );
 
   return {
@@ -97,6 +100,7 @@ function resolveAccount(
     appKey: appKey ?? '',
     appSecret: appSecret ?? '',
     robotId: robotId ?? '',
+    openTeamId: openTeamId ?? '',
     environment: accountConfig.environment ?? DEFAULTS.environment,
     webhookPort: accountConfig.webhookPort ?? DEFAULTS.webhookPort,
     verificationToken,
