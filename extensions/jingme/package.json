@@ -1,5 +1,5 @@
 {
-  "name": "@jd/clawdbot-jingme",
+  "name": "@jd/moltbot-jingme",
   "version": "0.0.1",
   "type": "module",
   "description": "Clawdbot JingMe (京me) channel plugin with enhanced features, improved error handling, and security",
