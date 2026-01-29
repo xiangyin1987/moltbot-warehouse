@@ -2,17 +2,36 @@
   "name": "@clawdbot/jingme",
   "version": "0.0.1",
   "type": "module",
-  "description": "Clawdbot JingMe (京me) channel plugin",
+  "description": "Clawdbot JingMe (京me) channel plugin with enhanced features, improved error handling, and security",
   "clawdbot": {
     "extensions": [
       "./index.ts"
     ]
   },
+  "keywords": [
+    "clawdbot",
+    "jingme",
+    "messaging",
+    "wechat",
+    "jd.com",
+    "channel",
+    "plugin"
+  ],
+  "author": "Plugin Developer",
+  "license": "MIT",
   "dependencies": {
-    "axios": "^1.6.0"
+    "undici": "^6.0.0"
   },
   "devDependencies": {
     "typescript": "^5.0.0",
     "@types/node": "^18.0.0"
-  }
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "files": [
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md"
+  ]
 }

@@ -21,6 +21,7 @@ import type {
 const DEFAULTS = {
   environment: 'prod' as const,
   webhookPort: 3001,
+  encryptKey: 'a98ad11ceb83bd34',
   dmPolicy: 'open' as const,
   groupPolicy: 'open' as const,
   historyLimit: 10,
@@ -79,6 +80,10 @@ function resolveAccount(
   const verificationToken =
     accountConfig.verificationToken ??
     (isDefault ? process.env.JINGME_VERIFICATION_TOKEN : undefined);
+  const encryptKey =
+    accountConfig.encryptKey ??
+    (isDefault ? process.env.JINGME_ENCRYPT_KEY : undefined) ??
+    DEFAULTS.encryptKey;
 
   const configured = Boolean(
     appKey?.trim() && appSecret?.trim() && robotId?.trim(),
@@ -95,6 +100,7 @@ function resolveAccount(
     environment: accountConfig.environment ?? DEFAULTS.environment,
     webhookPort: accountConfig.webhookPort ?? DEFAULTS.webhookPort,
     verificationToken,
+    encryptKey,
     dmPolicy: accountConfig.dmPolicy ?? DEFAULTS.dmPolicy,
     dmAllowlist: accountConfig.dmAllowlist ?? [],
     groupPolicy: accountConfig.groupPolicy ?? DEFAULTS.groupPolicy,
@@ -107,43 +113,84 @@ function resolveAccount(
  * Send a text message via JingMe API
  * Supports both direct messages (sessionType=1) and group messages (sessionType=2)
  */
-async function sendTextMessage(
+export async function sendTextMessage(
   account: ResolvedJingmeAccount,
   sessionId: string,
   sessionType: 1 | 2,
   text: string,
 ): Promise<SendResult> {
   try {
+    const api = getJingmeRuntime();
     const client = createJingmeClient(account);
 
-    const response = await client.post(
-      '/open-api/suite/v1/timline/sendRobotMsg',
-      {
-        robotId: account.robotId,
-        sessionId,
-        sessionType, // 1: direct message, 2: group message
-        msgType: 'text',
-        content: text,
-      },
-    );
+    const MAX_SINGLE = 2000;
+    const CHUNK_SIZE = 1800;
 
-    if (response.data.code === 1 && response.data.data?.msgId) {
-      return { ok: true, messageId: response.data.data.msgId };
+    async function sendChunk(textChunk: string): Promise<SendResult> {
+      const requestId = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+
+      let requestBody: any = {
+        appId: account.appKey,
+        requestId: requestId,
+        dateTime: Date.now(),
+        params: {
+          robotId: account.robotId,
+          body: {
+            type: 'text',
+            content: textChunk,
+          },
+        },
+      };
+
+      if (sessionType === 1) {
+        requestBody.erp = sessionId;
+        requestBody.tenantId = 'CN.JD.GROUP';
+      } else {
+        requestBody.groupId = sessionId;
+      }
+
+      const response = await client.post(
+        '/open-api/suite/v1/timline/sendRobotMsg',
+        requestBody,
+      );
+
+      if (response.data.code === 0) {
+        api.logger.info(
+          `[jingme] Message sent successfully: packetId=${response.data.data?.packetId}`,
+        );
+        return {
+          ok: true,
+          messageId: response.data.data?.packetId || requestId,
+        };
+      }
+
+      const error = response.data.msg || 'Unknown error';
+      api.logger.warn(`[jingme] Failed to send message: ${error}`);
+      return { ok: false, error };
     }
 
-    const error = response.data.msg ?? 'Unknown error';
-    console.warn(`[jingme] Failed to send message: ${error}`);
-    return {
-      ok: false,
-      error,
-    };
+    if (text.length > MAX_SINGLE) {
+      const chunks: string[] = [];
+      for (let i = 0; i < text.length; i += CHUNK_SIZE) {
+        chunks.push(text.slice(i, i + CHUNK_SIZE));
+      }
+
+      let lastMessageId: string | undefined;
+      for (let i = 0; i < chunks.length; i++) {
+        const res = await sendChunk(chunks[i]);
+        if (!res.ok) {
+          return { ok: false, error: res.error };
+        }
+        lastMessageId = res.messageId;
+      }
+      return { ok: true, messageId: lastMessageId };
+    }
+
+    return await sendChunk(text);
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : 'Unknown error';
     console.error(`[jingme] Exception sending message: ${errorMsg}`, error);
-    return {
-      ok: false,
-      error: errorMsg,
-    };
+    return { ok: false, error: errorMsg };
   }
 }
 
@@ -165,8 +212,8 @@ async function listGroups(
 
     if (response.data.code === 1 && Array.isArray(response.data.data)) {
       const groups = response.data.data.map((group: any) => ({
-        id: group.gid ?? '',
-        name: group.groupName ?? 'Unknown',
+        id: group.gid || '',
+        name: group.groupName || 'Unknown',
       }));
       return groups;
     }

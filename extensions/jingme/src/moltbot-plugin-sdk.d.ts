@@ -133,6 +133,7 @@ export interface ChannelPlugin<TAccount extends AccountConfig = AccountConfig> {
 export interface MoltbotPluginApi {
   logger: ILogger;
   config?: MoltbotConfig;
+  runtime?: any; // Runtime context with channel routing and reply handling
 
   registerChannel(options: { plugin: ChannelPlugin<any> }): void;
 

@@ -1,14 +1,7 @@
-/**
- * JingMe Webhook Server
- *
- * Standalone HTTP server for receiving JingMe webhook callbacks.
- * Validates requests and routes messages to Moltbot handler.
- */
-
 import * as http from 'node:http';
 import * as crypto from 'node:crypto';
-
 import { getJingmeRuntime } from './runtime.js';
+import { sendTextMessage } from './channel.js';
 import type { ResolvedJingmeAccount, JingmeMessageEvent } from './types.js';
 
 const RESTART_DELAY_MS = 3000;
@@ -21,239 +14,247 @@ interface WebhookServer {
 }
 
 /**
- * Verify webhook request signature
- * JingMe uses token-based verification
+ * Decrypt AES-256-CBC encrypted event data from JingMe.
+ * The encrypted data format: Base64(IV + Ciphertext)
+ * - First 16 bytes: IV (Initialization Vector)
+ * - Remaining bytes: Ciphertext
  */
-function verifySignature(
-  token: string,
-  timestamp: number,
-  body: string,
-  signature: string,
-): boolean {
-  // Create the string to sign: token + timestamp + body
-  const signContent = token + timestamp + body;
-  // Calculate SHA256 hash
-  const calculated = crypto
-    .createHash('sha256')
-    .update(signContent)
-    .digest('hex');
-
-  const isValid = calculated === signature;
-  return isValid;
+function decryptEvent(encrypted: string, encryptKey: string): string {
+  const key = crypto.createHash('sha256').update(encryptKey).digest();
+  const encryptedBuffer = Buffer.from(encrypted, 'base64');
+  const iv = encryptedBuffer.subarray(0, 16);
+  const ciphertext = encryptedBuffer.subarray(16);
+  const decipher = crypto.createDecipheriv('aes-256-cbc', key, iv);
+  let decrypted = decipher.update(ciphertext, undefined, 'utf8');
+  decrypted += decipher.final('utf8');
+  return decrypted;
 }
 
-/**
- * Parse request body as JSON
- */
 async function parseBody(req: http.IncomingMessage): Promise<unknown> {
-  return new Promise((resolve, reject) => {
-    const chunks: Buffer[] = [];
-    req.on('data', (chunk) => {
-      chunks.push(chunk);
-    });
-    req.on('end', () => {
-      try {
-        const body = Buffer.concat(chunks).toString('utf8');
-        resolve(JSON.parse(body));
-      } catch (err) {
-        console.error(`[jingme] Failed to parse body: ${err}`);
-        reject(err);
-      }
-    });
-    req.on('error', reject);
-  });
+  const buffers = [];
+  for await (const chunk of req) {
+    buffers.push(chunk);
+  }
+  const body = Buffer.concat(buffers).toString('utf8');
+  try {
+    return JSON.parse(body);
+  } catch (err) {
+    console.error(`[jingme] Failed to parse body: ${err}`);
+    throw err;
+  }
 }
 
-/**
- * Route incoming message to Moltbot handler
- */
 async function routeMessage(
-  event: JingmeMessageEvent,
+  message: JingmeMessageEvent,
   account: ResolvedJingmeAccount,
-): Promise<void> {
+): Promise<{
+  msgId: string;
+  sender?: string;
+  timestamp?: number;
+}> {
   const api = getJingmeRuntime();
+  const core = api.runtime;
+  const cfg = api.config;
 
-  // Validate message content
-  const text = event.body.content?.trim() || '';
+  const text = message.event.body.content?.trim() || '';
   if (!text) {
     api.logger.debug('[jingme] Skipping empty message');
-    return;
+    return {
+      msgId: message.event.msgId,
+      sender: message.event.sender.pin,
+      timestamp: Math.floor(message.timeStamp / 1000),
+    };
   }
 
-  const messageId = event.body.cardMsgId || `${event.datetime}`;
-  const sessionType = event.body.sessionType === 1 ? 'direct' : 'group';
-  const sessionId = event.body.sessionId;
-  const senderId = event.from.pin;
+  const messageId = message.event.msgId;
+  const chatType = message.event.chatType === 1 ? 'direct' : 'group';
+  const sessionId = message.event.sender.pin;
+  const senderId = message.event.sender.pin;
 
   api.logger.info(
-    `[jingme] Received message from ${senderId} in ${sessionType} ${sessionId}`,
+    `[jingme] Received message from ${senderId} in ${chatType} ${sessionId}`,
   );
 
   try {
-    await api.inbound.handleMessage({
+    // Build JingMe-specific identifiers
+    const jingmeFrom = `jingme:${account.accountId}:${senderId}`;
+    const jingmeTo = `jingme:${account.accountId}:${sessionId}`;
+
+    // Resolve routing to find the agent
+    const route = await core.channel.routing.resolveAgentRoute({
+      cfg,
       channel: 'jingme',
       accountId: account.accountId,
-      messageId,
+      chatType,
       chatId: sessionId,
-      chatType: sessionType,
       senderId,
-      text,
-      timestamp: Math.floor(event.datetime / 1000), // Convert to seconds
-      raw: event,
     });
+
+    if (!route) {
+      api.logger.warn('[jingme] No route found for message');
+      return {
+        msgId: messageId,
+        sender: senderId,
+        timestamp: Math.floor(message.timeStamp / 1000),
+      };
+    }
+
+    // Finalize inbound context
+    const ctxPayload = core.channel.reply.finalizeInboundContext({
+      Body: text,
+      RawBody: text,
+      CommandBody: text,
+      From: jingmeFrom,
+      To: jingmeTo,
+      SessionKey: route.sessionKey,
+      AccountId: route.accountId,
+      ChatType: chatType,
+      GroupSubject: chatType === 'group' ? sessionId : undefined,
+      SenderName: senderId,
+      SenderId: senderId,
+      Provider: 'jingme',
+      Surface: 'jingme',
+      MessageSid: messageId,
+      Timestamp: Date.now(),
+      WasMentioned: false,
+      CommandAuthorized: true,
+      OriginatingChannel: 'jingme',
+      OriginatingTo: jingmeTo,
+    });
+
+    // Create a dispatcher that sends replies back to JingMe
+    const dispatcher = {
+      async sendBlockReply(block: Record<string, unknown>) {
+        // Handle text replies
+        const replyText = (block.markdown || block.text || '') as string;
+        if (!replyText.trim()) return;
+
+        const sessionType: 1 | 2 = chatType === 'direct' ? 1 : 2;
+
+        await sendTextMessage(account, sessionId, sessionType, replyText);
+      },
+      async waitForIdle() {
+        // No buffering, messages sent immediately
+      },
+      getQueuedCounts() {
+        return { blocks: 0, chars: 0 };
+      },
+    };
+
+    // Dispatch the message to the agent
+    await core.channel.reply.dispatchReplyFromConfig({
+      ctx: ctxPayload,
+      cfg,
+      dispatcher,
+      replyOptions: {
+        agentId: route.agentId,
+        channel: 'jingme',
+        accountId: account.accountId,
+      },
+    });
+
+    return {
+      msgId: messageId,
+      sender: senderId,
+      timestamp: Math.floor(message.timeStamp / 1000),
+    };
   } catch (error) {
     console.error(`[jingme] Failed to route message: ${error}`, error);
     throw error;
   }
 }
 
-/**
- * Send JSON response with proper status code and headers
- */
 function sendResponse(
   res: http.ServerResponse,
   statusCode: number,
-  data: { code: number; msg: string; data?: unknown },
+  data: { msg: string; code: number; data?: unknown },
 ): void {
   res.writeHead(statusCode, { 'Content-Type': 'application/json' });
   res.end(JSON.stringify(data));
 }
 
-/**
- * Create webhook request handler
- *
- * Handles webhook requests with the following logic:
- * 1. Validate HTTP method (POST only)
- * 2. Extract and validate signature and timestamp headers
- * 3. Parse and validate request body
- * 4. Verify webhook signature (if verification token is configured)
- * 5. Route message to Moltbot handler
- * 6. Return appropriate response
- */
 function createRequestHandler(account: ResolvedJingmeAccount) {
+  const resultInfo = { msg: '消息处理成功', code: 1, data: null };
   return async (req: http.IncomingMessage, res: http.ServerResponse) => {
     const api = getJingmeRuntime();
-
-    // Step 1: Validate HTTP method - Only handle POST requests
     if (req.method !== 'POST') {
       api.logger.warn(`[jingme] Invalid HTTP method: ${req.method}`);
-      sendResponse(res, 405, { code: 0, msg: 'Method not allowed' });
+      sendResponse(res, 405, { ...resultInfo, msg: 'Method not allowed' });
       return;
     }
 
     try {
-      // Step 2: Extract signature and timestamp headers
-      const signature = req.headers['x-jingme-signature'] as string;
-      const timestamp = parseInt(
-        req.headers['x-jingme-timestamp'] as string,
-        10,
-      );
-
-      if (!signature || !timestamp || Number.isNaN(timestamp)) {
-        api.logger.warn(
-          '[jingme] Missing or invalid signature/timestamp headers',
-        );
-        sendResponse(res, 400, {
-          code: 0,
-          msg: 'Missing or invalid signature/timestamp',
-        });
-        return;
-      }
-
-      api.logger.debug(
-        `[jingme] Webhook request received - Signature: ${signature.substring(0, 8)}..., Timestamp: ${timestamp}`,
-      );
-
-      // Step 3: Parse request body
       let body: unknown;
       try {
         body = await parseBody(req);
+        if (Object.keys(body).length === 0) {
+          return sendResponse(res, 200, resultInfo);
+        }
+        const bodyObj = body as Record<string, unknown>;
+        if (
+          bodyObj.encrypt &&
+          typeof bodyObj.encrypt === 'string' &&
+          account.encryptKey
+        ) {
+          try {
+            const decrypted = decryptEvent(bodyObj.encrypt, account.encryptKey);
+            body = JSON.parse(decrypted);
+          } catch (decryptError) {
+            api.logger.error(
+              `[jingme] Failed to decrypt message: ${decryptError}`,
+            );
+            sendResponse(res, 400, { ...resultInfo, msg: 'Failed to decrypt' });
+            return;
+          }
+        }
       } catch (parseError) {
         api.logger.error(
           `[jingme] Failed to parse request body: ${parseError}`,
         );
-        sendResponse(res, 400, {
-          code: 0,
-          msg: 'Invalid request body format',
-        });
+        sendResponse(res, 400, { ...resultInfo, msg: 'Invalid request body' });
         return;
       }
 
-      // Step 4: Validate body is an object
       if (typeof body !== 'object' || body === null) {
         api.logger.warn('[jingme] Invalid request body: not an object');
-        sendResponse(res, 400, {
-          code: 0,
-          msg: 'Invalid request body',
-        });
+        sendResponse(res, 400, { ...resultInfo, msg: 'Invalid request body' });
         return;
       }
 
-      const bodyStr = JSON.stringify(body);
-
-      // Step 5: Verify webhook signature if token is configured
-      if (account.verificationToken) {
-        const isSignatureValid = verifySignature(
-          account.verificationToken,
-          timestamp,
-          bodyStr,
-          signature,
+      const bodyObj = body as JingmeMessageEvent;
+      if (bodyObj.challenge) {
+        api.logger.info(
+          `[jingme] Verification request detected, challenge: ${bodyObj.challenge}`,
         );
-
-        if (!isSignatureValid) {
-          api.logger.warn('[jingme] Webhook signature verification failed');
-          sendResponse(res, 403, {
-            code: 0,
-            msg: 'Signature verification failed',
-          });
-          return;
-        }
-
-        api.logger.debug('[jingme] Webhook signature verified successfully');
-      } else {
-        api.logger.debug(
-          '[jingme] Verification token not configured, skipping signature verification',
-        );
+        sendResponse(res, 200, { ...resultInfo, msg: '验证成功' });
+        return;
       }
 
-      // Step 6: Route the message to Moltbot handler
       try {
-        await routeMessage(body as JingmeMessageEvent, account);
-        api.logger.info('[jingme] Message routed successfully');
+        if (bodyObj.eventType === 'chat_message') {
+          routeMessage(bodyObj, account);
+          return sendResponse(res, 200, resultInfo);
+        } else {
+          api.logger.info(
+            `[jingme] 暂时不支持处理该类型的消息${bodyObj.eventType}`,
+          );
+          return sendResponse(res, 200, resultInfo);
+        }
       } catch (routeError) {
         const routeErrorMsg =
           routeError instanceof Error ? routeError.message : String(routeError);
         api.logger.error(`[jingme] Failed to route message: ${routeErrorMsg}`);
-        // Return error response with 500 status code
-        sendResponse(res, 500, {
-          code: 0,
-          msg: 'Failed to process message',
-        });
+        sendResponse(res, 500, { ...resultInfo, msg: '消息处理失败' });
         return;
       }
-
-      // Step 7: Send success response
-      api.logger.info('[jingme] Webhook request processed successfully');
-      sendResponse(res, 200, {
-        code: 1,
-        msg: 'Success',
-      });
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
       api.logger.error(`[jingme] Unexpected webhook error: ${errorMsg}`);
-
-      // Return error response with 500 status code
-      sendResponse(res, 500, {
-        code: 0,
-        msg: 'Internal server error',
-      });
+      sendResponse(res, 500, { ...resultInfo, msg: 'Internal server error' });
     }
   };
 }
 
-/**
- * Start webhook server for a single account
- */
 export function startWebhookServer(
   account: ResolvedJingmeAccount,
   abortSignal?: AbortSignal,
@@ -272,7 +273,6 @@ export function startWebhookServer(
       api.logger.error(`[jingme] Webhook server error: ${error}`);
       console.error(`[jingme] Webhook server error: ${error}`, error);
 
-      // Attempt automatic restart
       if (restartCount < MAX_RESTART_ATTEMPTS) {
         restartCount++;
         api.logger.info(
@@ -312,14 +312,12 @@ export function startWebhookServer(
     },
   };
 
-  // Create and start the server
   webhookServer.server = createServer();
 
   webhookServer.server.listen(port, () => {
     api.logger.info(`[jingme] Webhook server listening on port ${port}`);
   });
 
-  // Handle abort signal for graceful shutdown
   if (abortSignal) {
     abortSignal.addEventListener('abort', () => {
       api.logger.info('[jingme] Stopping webhook server');

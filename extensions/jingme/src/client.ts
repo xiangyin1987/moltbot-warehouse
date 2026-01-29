@@ -5,8 +5,8 @@
  * Handles authentication and token management.
  */
 
-import axios, { type AxiosInstance } from 'axios';
-import type { ResolvedJingmeAccount } from './types.js';
+import { request } from 'undici';
+import type { ResolvedJingmeAccount, TokenResponse } from './types.js';
 
 // API domain mapping
 const API_DOMAINS = {
@@ -18,7 +18,7 @@ const API_DOMAINS = {
 const tokenCache = new Map<string, { token: string; expiresAt: number }>();
 
 // Cache for client instances
-const clientCache = new Map<string, AxiosInstance>();
+const clientCache = new Map<string, any>();
 
 /**
  * Generate cache key for an account
@@ -36,40 +36,69 @@ function getApiDomain(environment: 'prod' | 'test'): string {
 
 /**
  * Get or refresh access token for the account
+ *
+ * First get appAccessToken, then use it to get teamAccessToken
  */
 async function getAccessToken(account: ResolvedJingmeAccount): Promise<string> {
   const cacheKey_ = cacheKey(account);
   const cached = tokenCache.get(cacheKey_);
   const now = Date.now();
 
-  // Return cached token if still valid (with 60s buffer)
   if (cached && cached.expiresAt > now + 60000) {
+    console.debug(`[jingme-client] cached: ${cached.token}`);
     return cached.token;
   }
 
-  // Request new token
   const domain = getApiDomain(account.environment);
-  const response = await axios.post(
-    `${domain}/open-api/suite/v1/access/getAppAccessToken`,
-    {
-      appKey: account.appKey,
-      appSecret: account.appSecret,
-    },
-    {
-      headers: {
-        'Content-Type': 'application/json; charset=utf-8',
-      },
-    },
-  );
+  const appTokenUrl = `${domain}/open-api/auth/v1/app_access_token`;
+  const appTokenBody = JSON.stringify({
+    appKey: account.appKey,
+    appSecret: account.appSecret,
+  });
 
-  if (response.data.code !== 1 || !response.data.data?.appAccessToken) {
+  const appTokenResponse = await request(appTokenUrl, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json; charset=utf-8',
+    },
+    body: appTokenBody,
+  });
+
+  const appTokenData = (await appTokenResponse.body.json()) as TokenResponse;
+
+  if (appTokenData.code !== 0 || !appTokenData.data?.appAccessToken) {
     throw new Error(
-      `Failed to get access token: ${response.data.msg || 'Unknown error'}`,
+      `Failed to get appAccessToken: ${appTokenData.msg || 'Unknown error'}`,
     );
   }
 
-  const token = response.data.data.appAccessToken;
-  const expiresIn = (response.data.data.expiresIn || 7200) * 1000; // Convert to ms
+  const appAccessToken = appTokenData.data.appAccessToken;
+
+  // Step 2: Get teamAccessToken using appAccessToken
+  const teamTokenUrl = `${domain}/open-api/auth/v1/team_access_token`;
+  const teamTokenBody = JSON.stringify({
+    appAccessToken: appAccessToken,
+    openTeamId: 'd12f8db0bd4f51552e878c2cbfa0c020', // Use robotId as openTeamId
+  });
+
+  const teamTokenResponse = await request(teamTokenUrl, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json; charset=utf-8',
+    },
+    body: teamTokenBody,
+  });
+
+  const teamTokenData = (await teamTokenResponse.body.json()) as TokenResponse;
+
+  if (teamTokenData.code !== 0 || !teamTokenData.data?.teamAccessToken) {
+    throw new Error(
+      `Failed to get teamAccessToken: ${teamTokenData.msg || 'Unknown error'}`,
+    );
+  }
+
+  const token = teamTokenData.data.teamAccessToken;
+  const expiresIn = (teamTokenData.data.expiresIn || 7200) * 1000; // Convert to ms
 
   // Cache the token
   tokenCache.set(cacheKey_, {
@@ -83,9 +112,7 @@ async function getAccessToken(account: ResolvedJingmeAccount): Promise<string> {
 /**
  * Create or retrieve a cached HTTP client for JingMe API
  */
-export function createJingmeClient(
-  account: ResolvedJingmeAccount,
-): AxiosInstance {
+export function createJingmeClient(account: ResolvedJingmeAccount): any {
   const key = cacheKey(account);
   const cached = clientCache.get(key);
 
@@ -95,19 +122,26 @@ export function createJingmeClient(
 
   const domain = getApiDomain(account.environment);
 
-  const client = axios.create({
+  // Simple client wrapper for undici
+  const client = {
     baseURL: domain,
-    headers: {
-      'Content-Type': 'application/json; charset=utf-8',
+    async post(path: string, data: any) {
+      const token = await getAccessToken(account);
+      const response = await request(`${domain}${path}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(data),
+      });
+      return {
+        data: await response.body.json(),
+        status: response.statusCode,
+        headers: response.headers,
+      };
     },
-  });
-
-  // Add request interceptor to include authorization header
-  client.interceptors.request.use(async (config) => {
-    const token = await getAccessToken(account);
-    config.headers.Authorization = `Bearer ${token}`;
-    return config;
-  });
+  };
 
   clientCache.set(key, client);
   return client;
