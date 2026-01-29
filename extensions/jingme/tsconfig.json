@@ -1,0 +1,21 @@
+{
+  "compilerOptions": {
+    "rootDir": "./",
+    "outDir": "./dist",
+    "lib": ["ES2020"],
+    "module": "node16",
+    "moduleResolution": "node16",
+    "target": "ES2020",
+    "skipLibCheck": true,
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "types": ["node"],
+    "paths": {
+      "clawdbot/plugin-sdk": ["./src/moltbot-plugin-sdk.d.ts"]
+    },
+    "ignoreDeprecations": "6.0"
+  },
+  "include": ["index.ts", "src/**/*.ts"],
+  "exclude": ["node_modules", "dist"]
+}
