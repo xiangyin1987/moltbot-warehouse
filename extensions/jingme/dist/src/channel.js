@@ -4,6 +4,7 @@
  * Implements the ChannelPlugin interface for JingMe integration.
  * Provides account configuration, message sending, and gateway management.
  */
+import { PAIRING_APPROVED_MESSAGE } from 'clawdbot/plugin-sdk';
 import { createJingmeClient } from './client.js';
 import { getJingmeRuntime } from './runtime.js';
 import { monitorJingmeProvider } from './monitor.js';
@@ -182,6 +183,24 @@ export const jingmePlugin = {
         blurb: 'Chat with your bot on JingMe (京ME)',
         order: 80,
     },
+    pairing: {
+        idLabel: 'jingmeUserId',
+        normalizeAllowEntry: (entry) => entry.replace(/^(jingme|user|erp):/i, ''),
+        notifyApproval: async ({ cfg, id }) => {
+            try {
+                const account = resolveAccount(cfg, 'default');
+                if (!account || !account.configured) {
+                    getJingmeRuntime().logger.warn('[jingme] notifyApproval skipped: account not configured');
+                    return;
+                }
+                await sendTextMessage(account, String(id), 1, PAIRING_APPROVED_MESSAGE);
+            }
+            catch (err) {
+                const msg = err instanceof Error ? err.message : String(err);
+                getJingmeRuntime().logger.warn(`[jingme] notifyApproval failed: ${msg}`);
+            }
+        },
+    },
     capabilities: {
         chatTypes: ['direct', 'group'],
         reactions: false,
@@ -189,6 +208,43 @@ export const jingmePlugin = {
         media: false,
         nativeCommands: false,
         streamingBlocked: false,
+    },
+    // Reload and config schema (1)
+    reload: { configPrefixes: ['channels.jingme'] },
+    configSchema: {
+        schema: {
+            type: 'object',
+            additionalProperties: false,
+            properties: {
+                enabled: { type: 'boolean' },
+                accounts: {
+                    type: 'object',
+                    additionalProperties: {
+                        type: 'object',
+                        additionalProperties: false,
+                        properties: {
+                            enabled: { type: 'boolean' },
+                            appKey: { type: 'string' },
+                            appSecret: { type: 'string' },
+                            robotId: { type: 'string' },
+                            openTeamId: { type: 'string' },
+                            environment: { type: 'string', enum: ['prod', 'test'] },
+                            webhookPort: { type: 'integer', minimum: 1 },
+                            verificationToken: { type: 'string' },
+                            encryptKey: { type: 'string' },
+                            dmPolicy: { type: 'string', enum: ['open', 'allowlist'] },
+                            dmAllowlist: { type: 'array', items: { type: 'string' } },
+                            groupPolicy: {
+                                type: 'string',
+                                enum: ['open', 'allowlist', 'disabled'],
+                            },
+                            groupAllowlist: { type: 'array', items: { type: 'string' } },
+                            historyLimit: { type: 'integer', minimum: 0 },
+                        },
+                    },
+                },
+            },
+        },
     },
     config: {
         listAccountIds(cfg) {
@@ -233,10 +289,31 @@ export const jingmePlugin = {
         chunkerMode: 'markdown',
         async sendText({ account, recipientId, text }) {
             console.log(`[JingMe Debug] sendText triggered! To: ${recipientId}, Content: ${text.substring(0, 20)}...`);
-            // Determine session type: "oc_" prefix = group, otherwise direct
-            const sessionType = recipientId.startsWith('oc_') ? 2 : 1;
-            getJingmeRuntime().logger.debug(`[jingme] sendText: ${account}${text}`);
+            // Determine session type based on id prefix
+            const r = String(recipientId).toLowerCase();
+            const isGroup = r.startsWith('gid_') || r.startsWith('group:') || r.startsWith('oc_');
+            const sessionType = isGroup ? 2 : 1;
+            getJingmeRuntime().logger.debug(`[jingme] sendText: ${account.accountId} -> ${recipientId} (${sessionType})`);
             return sendTextMessage(account, recipientId, sessionType, text);
+        },
+    },
+    messaging: {
+        normalizeTarget: (target) => {
+            const t = String(target || '').trim();
+            if (!t)
+                return '';
+            // Accept formats: "erp:<id>", "user:<id>", "group:<gid>", raw id
+            if (/^(erp|user):/i.test(t))
+                return t.replace(/^(erp|user):/i, '');
+            if (/^(group|gid):/i.test(t)) {
+                const v = t.replace(/^(group|gid):/i, '');
+                return v.startsWith('gid_') ? v : `gid_${v}`;
+            }
+            return t;
+        },
+        targetResolver: {
+            looksLikeId: (id) => /^(gid_|oc_|[A-Za-z0-9._-]+)$/.test(String(id || '')),
+            hint: '<erpId|group:gid_XXX>',
         },
     },
     gateway: {
@@ -266,6 +343,14 @@ export const jingmePlugin = {
         },
         async resolveSelf() {
             return null;
+        },
+        // Live directory methods (1)
+        async listPeersLive() {
+            // No live user search API available – return empty
+            return [];
+        },
+        async listGroupsLive({ account }) {
+            return listGroups(account);
         },
     },
     dmPolicy: {
@@ -305,6 +390,62 @@ export const jingmePlugin = {
             }
             return errors;
         },
+    },
+    // Security advisory (2)
+    security: {
+        collectWarnings: ({ cfg }) => {
+            const channelCfg = getChannelConfig(cfg);
+            const defaultGroupPolicy = cfg.channels?.defaults?.groupPolicy;
+            const groupPolicy = channelCfg.accounts?.default?.groupPolicy ?? defaultGroupPolicy ?? 'allowlist';
+            if (groupPolicy !== 'open')
+                return [];
+            return [
+                '- JingMe groups: groupPolicy="open" 允许任何成员触发。建议将 channels.jingme.accounts.default.groupPolicy 设为 "allowlist" 并配置 groupAllowlist 以限制发送者。',
+            ];
+        },
+    },
+    // Status & probe (1)
+    status: {
+        defaultRuntime: {
+            accountId: 'default',
+            running: false,
+            lastStartAt: null,
+            lastStopAt: null,
+            lastError: null,
+            port: null,
+        },
+        buildChannelSummary: ({ snapshot }) => ({
+            configured: snapshot.configured ?? false,
+            running: snapshot.running ?? false,
+            lastStartAt: snapshot.lastStartAt ?? null,
+            lastStopAt: snapshot.lastStopAt ?? null,
+            lastError: snapshot.lastError ?? null,
+            port: snapshot.port ?? null,
+            probe: snapshot.probe,
+            lastProbeAt: snapshot.lastProbeAt ?? null,
+        }),
+        probeAccount: async ({ account }) => {
+            try {
+                // Use listGroups as a lightweight connectivity probe
+                await listGroups(account);
+                return { ok: true };
+            }
+            catch (e) {
+                const msg = e instanceof Error ? e.message : String(e);
+                return { ok: false, error: msg };
+            }
+        },
+        buildAccountSnapshot: ({ account, runtime, probe }) => ({
+            accountId: account.accountId,
+            enabled: account.enabled,
+            configured: account.configured,
+            running: runtime?.running ?? false,
+            lastStartAt: runtime?.lastStartAt ?? null,
+            lastStopAt: runtime?.lastStopAt ?? null,
+            lastError: runtime?.lastError ?? null,
+            port: runtime?.port ?? null,
+            probe,
+        }),
     },
 };
 //# sourceMappingURL=channel.js.map

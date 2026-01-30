@@ -6,6 +6,7 @@
  */
 
 import type { ChannelPlugin, MoltbotConfig } from 'clawdbot/plugin-sdk';
+import { PAIRING_APPROVED_MESSAGE } from 'clawdbot/plugin-sdk';
 
 import { createJingmeClient } from './client.js';
 import { getJingmeRuntime } from './runtime.js';
@@ -245,6 +246,26 @@ export const jingmePlugin: ChannelPlugin<ResolvedJingmeAccount> = {
     order: 80,
   },
 
+  pairing: {
+    idLabel: 'jingmeUserId',
+    normalizeAllowEntry: (entry) => entry.replace(/^(jingme|user|erp):/i, ''),
+    notifyApproval: async ({ cfg, id }) => {
+      try {
+        const account = resolveAccount(cfg, 'default');
+        if (!account || !account.configured) {
+          getJingmeRuntime().logger.warn('[jingme] notifyApproval skipped: account not configured');
+          return;
+        }
+        await sendTextMessage(account, String(id), 1, PAIRING_APPROVED_MESSAGE);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        getJingmeRuntime().logger.warn(`[jingme] notifyApproval failed: ${msg}`);
+      }
+    },
+  },
+
+  
+
   capabilities: {
     chatTypes: ['direct', 'group'],
     reactions: false,
@@ -252,6 +273,44 @@ export const jingmePlugin: ChannelPlugin<ResolvedJingmeAccount> = {
     media: false,
     nativeCommands: false,
     streamingBlocked: false,
+  },
+
+  // Reload and config schema (1)
+  reload: { configPrefixes: ['channels.jingme'] },
+  configSchema: {
+    schema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        enabled: { type: 'boolean' },
+        accounts: {
+          type: 'object',
+          additionalProperties: {
+            type: 'object',
+            additionalProperties: false,
+            properties: {
+              enabled: { type: 'boolean' },
+              appKey: { type: 'string' },
+              appSecret: { type: 'string' },
+              robotId: { type: 'string' },
+              openTeamId: { type: 'string' },
+              environment: { type: 'string', enum: ['prod', 'test'] },
+              webhookPort: { type: 'integer', minimum: 1 },
+              verificationToken: { type: 'string' },
+              encryptKey: { type: 'string' },
+              dmPolicy: { type: 'string', enum: ['open', 'allowlist'] },
+              dmAllowlist: { type: 'array', items: { type: 'string' } },
+              groupPolicy: {
+                type: 'string',
+                enum: ['open', 'allowlist', 'disabled'],
+              },
+              groupAllowlist: { type: 'array', items: { type: 'string' } },
+              historyLimit: { type: 'integer', minimum: 0 },
+            },
+          },
+        },
+      },
+    },
   },
 
   config: {
@@ -314,11 +373,31 @@ export const jingmePlugin: ChannelPlugin<ResolvedJingmeAccount> = {
       console.log(
         `[JingMe Debug] sendText triggered! To: ${recipientId}, Content: ${text.substring(0, 20)}...`,
       );
-      // Determine session type: "oc_" prefix = group, otherwise direct
-      const sessionType: 1 | 2 = recipientId.startsWith('oc_') ? 2 : 1;
+      // Determine session type based on id prefix
+      const r = String(recipientId).toLowerCase();
+      const isGroup = r.startsWith('gid_') || r.startsWith('group:') || r.startsWith('oc_');
+      const sessionType: 1 | 2 = isGroup ? 2 : 1;
 
-      getJingmeRuntime().logger.debug(`[jingme] sendText: ${account}${text}`);
+      getJingmeRuntime().logger.debug(`[jingme] sendText: ${account.accountId} -> ${recipientId} (${sessionType})`);
       return sendTextMessage(account, recipientId, sessionType, text);
+    },
+  },
+
+  messaging: {
+    normalizeTarget: (target: string) => {
+      const t = String(target || '').trim();
+      if (!t) return '';
+      // Accept formats: "erp:<id>", "user:<id>", "group:<gid>", raw id
+      if (/^(erp|user):/i.test(t)) return t.replace(/^(erp|user):/i, '');
+      if (/^(group|gid):/i.test(t)) {
+        const v = t.replace(/^(group|gid):/i, '');
+        return v.startsWith('gid_') ? v : `gid_${v}`;
+      }
+      return t;
+    },
+    targetResolver: {
+      looksLikeId: (id: string) => /^(gid_|oc_|[A-Za-z0-9._-]+)$/.test(String(id || '')),
+      hint: '<erpId|group:gid_XXX>',
     },
   },
 
@@ -359,6 +438,15 @@ export const jingmePlugin: ChannelPlugin<ResolvedJingmeAccount> = {
 
     async resolveSelf() {
       return null;
+    },
+
+    // Live directory methods (1)
+    async listPeersLive() {
+      // No live user search API available – return empty
+      return [];
+    },
+    async listGroupsLive({ account }: { account: ResolvedJingmeAccount }) {
+      return listGroups(account);
     },
   },
 
@@ -419,5 +507,61 @@ export const jingmePlugin: ChannelPlugin<ResolvedJingmeAccount> = {
 
       return errors;
     },
+  },
+
+  // Security advisory (2)
+  security: {
+    collectWarnings: ({ cfg }) => {
+      const channelCfg = getChannelConfig(cfg);
+      const defaultGroupPolicy = (cfg.channels as Record<string, { groupPolicy?: string }> | undefined)?.defaults?.groupPolicy;
+      const groupPolicy = channelCfg.accounts?.default?.groupPolicy ?? defaultGroupPolicy ?? 'allowlist';
+      if (groupPolicy !== 'open') return [];
+      return [
+        '- JingMe groups: groupPolicy="open" 允许任何成员触发。建议将 channels.jingme.accounts.default.groupPolicy 设为 "allowlist" 并配置 groupAllowlist 以限制发送者。',
+      ];
+    },
+  },
+
+  // Status & probe (1)
+  status: {
+    defaultRuntime: {
+      accountId: 'default',
+      running: false,
+      lastStartAt: null,
+      lastStopAt: null,
+      lastError: null,
+      port: null,
+    },
+    buildChannelSummary: ({ snapshot }) => ({
+      configured: snapshot.configured ?? false,
+      running: snapshot.running ?? false,
+      lastStartAt: snapshot.lastStartAt ?? null,
+      lastStopAt: snapshot.lastStopAt ?? null,
+      lastError: snapshot.lastError ?? null,
+      port: snapshot.port ?? null,
+      probe: snapshot.probe,
+      lastProbeAt: snapshot.lastProbeAt ?? null,
+    }),
+    probeAccount: async ({ account }: { account: ResolvedJingmeAccount }) => {
+      try {
+        // Use listGroups as a lightweight connectivity probe
+        await listGroups(account);
+        return { ok: true };
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        return { ok: false, error: msg } as any;
+      }
+    },
+    buildAccountSnapshot: ({ account, runtime, probe }: any) => ({
+      accountId: account.accountId,
+      enabled: account.enabled,
+      configured: account.configured,
+      running: runtime?.running ?? false,
+      lastStartAt: runtime?.lastStartAt ?? null,
+      lastStopAt: runtime?.lastStopAt ?? null,
+      lastError: runtime?.lastError ?? null,
+      port: runtime?.port ?? null,
+      probe,
+    }),
   },
 };

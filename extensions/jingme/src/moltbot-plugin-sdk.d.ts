@@ -66,6 +66,23 @@ export interface ChannelPlugin<TAccount extends AccountConfig = AccountConfig> {
     streamingBlocked?: boolean;
   };
 
+  // Reload support
+  reload?: {
+    configPrefixes?: string[];
+  };
+
+  // Config schema (top-level)
+  configSchema?: {
+    schema?: PluginConfigSchema | Record<string, any>;
+  };
+
+  // Pairing helpers
+  pairing?: {
+    idLabel?: string;
+    normalizeAllowEntry?: (entry: string) => string;
+    notifyApproval?: (args: { cfg: MoltbotConfig; id: string }) => Promise<void>;
+  };
+
   config?: {
     listAccountIds?(cfg: MoltbotConfig): string[];
     resolveAccount?(cfg: MoltbotConfig, id?: string): TAccount | null;
@@ -101,6 +118,8 @@ export interface ChannelPlugin<TAccount extends AccountConfig = AccountConfig> {
     resolveSelf?(account?: TAccount): Promise<any>;
     listGroups?(account: TAccount): Promise<any>;
     listPeers?(account?: TAccount): Promise<any>;
+    listGroupsLive?(args: { account: TAccount; query?: string; limit?: number }): Promise<any>;
+    listPeersLive?(args: { account: TAccount; query?: string; limit?: number }): Promise<any>;
   };
 
   dmPolicy?: {
@@ -124,6 +143,35 @@ export interface ChannelPlugin<TAccount extends AccountConfig = AccountConfig> {
 
   inbound?: {
     onMessage?(data: any): Promise<void>;
+  };
+
+  // Messaging helpers: target normalization and hints
+  messaging?: {
+    normalizeTarget?: (target: string) => string;
+    targetResolver?: {
+      looksLikeId?: (id: string) => boolean;
+      hint?: string;
+    };
+  };
+
+  // Security advisories
+  security?: {
+    collectWarnings?: (args: { cfg: MoltbotConfig }) => string[];
+  };
+
+  // Status and probe helpers
+  status?: {
+    defaultRuntime?: {
+      accountId: string;
+      running: boolean;
+      lastStartAt: number | null;
+      lastStopAt: number | null;
+      lastError: string | null;
+      port: number | null;
+    };
+    buildChannelSummary?: (args: { snapshot: any }) => any;
+    probeAccount?: (args: any) => Promise<any>;
+    buildAccountSnapshot?: (args: any) => any;
   };
 }
 
@@ -175,6 +223,9 @@ export function createPluginConfigSchema(
     additionalProperties: false,
   };
 }
+
+// Common exported constants from plugin-sdk
+export const PAIRING_APPROVED_MESSAGE: string;
 
 /**
  * Plugin registration function type

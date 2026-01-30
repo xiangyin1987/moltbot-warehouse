@@ -56,7 +56,11 @@ async function routeMessage(
   const core = api.runtime;
   const cfg = api.config;
 
-  const text = message.event.body.content?.trim() || '';
+  const text = (
+    message.event.body.content ??
+    message.event.body.param?.pushContent ??
+    ''
+  ).trim();
   if (!text) {
     api.logger.debug('[jingme] Skipping empty message');
     return {
@@ -68,7 +72,7 @@ async function routeMessage(
 
   const messageId = message.event.msgId;
   const chatType = message.event.chatType === 1 ? 'direct' : 'group';
-  const sessionId = message.event.sender.pin;
+  const sessionId = message.event.body.requestData?.sessionId;
   const senderId = message.event.sender.pin;
 
   api.logger.info(
@@ -131,7 +135,7 @@ async function routeMessage(
 
         const sessionType: 1 | 2 = chatType === 'direct' ? 1 : 2;
 
-        await sendTextMessage(account, sessionId, sessionType, replyText);
+        await sendTextMessage(account, senderId, sessionType, replyText);
       },
       async waitForIdle() {
         // No buffering, messages sent immediately
