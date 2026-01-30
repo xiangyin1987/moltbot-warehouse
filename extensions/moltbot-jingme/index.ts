@@ -28,8 +28,8 @@ export type {
 } from './src/types.js';
 
 const plugin = {
-  id: 'moltbot-jingme',
-  name: 'JingMe',
+  id: 'jingme',
+  name: '@jd-moltbot/jingme',
   description: 'JingMe (京ME) channel plugin for Moltbot',
   configSchema: emptyPluginConfigSchema(),
   register(api: MoltbotPluginApi) {

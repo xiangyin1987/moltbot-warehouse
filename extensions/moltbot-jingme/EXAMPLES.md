@@ -211,7 +211,7 @@ docker-compose down
 module.exports = {
   apps: [
     {
-      name: 'moltbot-jingme',
+      name: 'jingme',
       script: './dist/index.js',
       
       // 集群模式
@@ -259,17 +259,17 @@ pm2 start ecosystem.config.js
 pm2 status
 
 # 查看日志
-pm2 logs moltbot-jingme
+pm2 logs jingme
 
 # 保存配置
 pm2 save
 pm2 startup
 
 # 重启
-pm2 restart moltbot-jingme
+pm2 restart jingme
 
 # 停止
-pm2 stop moltbot-jingme
+pm2 stop jingme
 ```
 
 ## systemd 服务配置

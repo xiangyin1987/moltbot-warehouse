@@ -59,7 +59,10 @@ function resolveAccount(cfg, accountId) {
     const encryptKey = accountConfig.encryptKey ??
         (isDefault ? process.env.JINGME_ENCRYPT_KEY : undefined) ??
         DEFAULTS.encryptKey;
-    const configured = Boolean(appKey?.trim() && appSecret?.trim() && robotId?.trim() && openTeamId?.trim());
+    const configured = Boolean(appKey?.trim() &&
+        appSecret?.trim() &&
+        robotId?.trim() &&
+        openTeamId?.trim());
     return {
         id: accountId,
         accountId,
@@ -396,7 +399,9 @@ export const jingmePlugin = {
         collectWarnings: ({ cfg }) => {
             const channelCfg = getChannelConfig(cfg);
             const defaultGroupPolicy = cfg.channels?.defaults?.groupPolicy;
-            const groupPolicy = channelCfg.accounts?.default?.groupPolicy ?? defaultGroupPolicy ?? 'allowlist';
+            const groupPolicy = channelCfg.accounts?.default?.groupPolicy ??
+                defaultGroupPolicy ??
+                'allowlist';
             if (groupPolicy !== 'open')
                 return [];
             return [

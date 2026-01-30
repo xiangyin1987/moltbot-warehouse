@@ -90,7 +90,10 @@ function resolveAccount(
     DEFAULTS.encryptKey;
 
   const configured = Boolean(
-    appKey?.trim() && appSecret?.trim() && robotId?.trim() && openTeamId?.trim(),
+    appKey?.trim() &&
+    appSecret?.trim() &&
+    robotId?.trim() &&
+    openTeamId?.trim(),
   );
 
   return {
@@ -253,18 +256,20 @@ export const jingmePlugin: ChannelPlugin<ResolvedJingmeAccount> = {
       try {
         const account = resolveAccount(cfg, 'default');
         if (!account || !account.configured) {
-          getJingmeRuntime().logger.warn('[jingme] notifyApproval skipped: account not configured');
+          getJingmeRuntime().logger.warn(
+            '[jingme] notifyApproval skipped: account not configured',
+          );
           return;
         }
         await sendTextMessage(account, String(id), 1, PAIRING_APPROVED_MESSAGE);
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
-        getJingmeRuntime().logger.warn(`[jingme] notifyApproval failed: ${msg}`);
+        getJingmeRuntime().logger.warn(
+          `[jingme] notifyApproval failed: ${msg}`,
+        );
       }
     },
   },
-
-  
 
   capabilities: {
     chatTypes: ['direct', 'group'],
@@ -375,10 +380,13 @@ export const jingmePlugin: ChannelPlugin<ResolvedJingmeAccount> = {
       );
       // Determine session type based on id prefix
       const r = String(recipientId).toLowerCase();
-      const isGroup = r.startsWith('gid_') || r.startsWith('group:') || r.startsWith('oc_');
+      const isGroup =
+        r.startsWith('gid_') || r.startsWith('group:') || r.startsWith('oc_');
       const sessionType: 1 | 2 = isGroup ? 2 : 1;
 
-      getJingmeRuntime().logger.debug(`[jingme] sendText: ${account.accountId} -> ${recipientId} (${sessionType})`);
+      getJingmeRuntime().logger.debug(
+        `[jingme] sendText: ${account.accountId} -> ${recipientId} (${sessionType})`,
+      );
       return sendTextMessage(account, recipientId, sessionType, text);
     },
   },
@@ -396,7 +404,8 @@ export const jingmePlugin: ChannelPlugin<ResolvedJingmeAccount> = {
       return t;
     },
     targetResolver: {
-      looksLikeId: (id: string) => /^(gid_|oc_|[A-Za-z0-9._-]+)$/.test(String(id || '')),
+      looksLikeId: (id: string) =>
+        /^(gid_|oc_|[A-Za-z0-9._-]+)$/.test(String(id || '')),
       hint: '<erpId|group:gid_XXX>',
     },
   },
@@ -513,8 +522,13 @@ export const jingmePlugin: ChannelPlugin<ResolvedJingmeAccount> = {
   security: {
     collectWarnings: ({ cfg }) => {
       const channelCfg = getChannelConfig(cfg);
-      const defaultGroupPolicy = (cfg.channels as Record<string, { groupPolicy?: string }> | undefined)?.defaults?.groupPolicy;
-      const groupPolicy = channelCfg.accounts?.default?.groupPolicy ?? defaultGroupPolicy ?? 'allowlist';
+      const defaultGroupPolicy = (
+        cfg.channels as Record<string, { groupPolicy?: string }> | undefined
+      )?.defaults?.groupPolicy;
+      const groupPolicy =
+        channelCfg.accounts?.default?.groupPolicy ??
+        defaultGroupPolicy ??
+        'allowlist';
       if (groupPolicy !== 'open') return [];
       return [
         '- JingMe groups: groupPolicy="open" 允许任何成员触发。建议将 channels.jingme.accounts.default.groupPolicy 设为 "allowlist" 并配置 groupAllowlist 以限制发送者。',
