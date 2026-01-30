@@ -13,7 +13,7 @@
 ## 安装
 
 ```bash
-npm install @clawdbot/jingme
+clawdbot plugins install @jd-moltbot/jingme
 ```
 
 ## 配置
