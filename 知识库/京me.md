@@ -3343,3 +3343,148 @@ export class MeService {
 }
 
 ```
+
+
+获取机器人所在的群
+注：每个app查询频率不得大于10次/秒
+请求基本
+说明
+HTTP URL
+http://openme.jd.local/open-api/suite/v1/timline/getRobotGroup
+HTTP Method
+POST
+请求头名称
+类型
+必填
+描述
+Content-Type
+string
+是
+固定值："application/json; charset=utf-8"
+authorization
+string
+是
+Bearer ${team_access_token}其中，'Bearer' 是固定值，中间空一格，后面带上team_access_token变量值。
+参数{
+    "appId": "Tb5Qx36pI1jugt0MxzbgJ",
+    "params": {
+        "pageNo": 1,            //页号
+        "pageSize": 10,         //分页大小，最大支持200
+        "robotId":"00_adf12312312"    //机器人ID
+    },
+    "requestId": "234234234234342348",
+    "dateTime": 1321231231
+}
+返回名称
+类型
+是否必须
+默认值
+备注
+code
+number
+必须
+
+状态码
+msg
+string
+非必须
+
+状态消息
+data
+object
+非必须
+
+响应数据
+—pageNo
+number
+必须
+
+页数，可能会与请求参数不一致，不建议使用。
+—has_more
+boolean
+必须
+
+是否还有群未读取完
+—groups
+object
+非必须
+
+群列表
+——owner
+object
+必须
+
+群主
+————app
+string
+必须
+
+用户app
+————pin
+string
+必须
+
+用户pin
+————name
+string
+非必须
+
+用户名称
+——onlyOwnerAdd
+boolean
+必须
+
+是否仅群主可以添加人
+——groupId
+string
+必须
+
+群号
+——intro
+string
+非必须
+
+群简介
+——name
+string
+非必须
+
+群名称
+——avatar
+string
+非必须
+
+群头像
+——canSearch
+boolean
+非必须
+
+是否可以被搜索
+——notice
+string
+非必须
+
+群公告
+{
+    "msg": "成功",
+    "code": 0,
+    "data": {
+        "pageNo": 2,
+        "hasMore": true,
+        "groups": [
+            {
+                "owner": {
+                    "app": "robot.dd",
+                    "pin": "app.ronklpqt"
+                },
+                "onlyOwnerAdd": false,
+                "groupId": "10208363463",
+                "intro": "",
+                "name": "黄震的开发者小助手",
+                "avatar": "https://eefs.jd.com/res/download/MrBQxWScF7qRwAEs6zofcsz0K.png?appKey=469ceef73b89853d",
+                "canSearch": false,
+                "notice": ""
+            }
+        ]
+    }
+}

@@ -5,6 +5,7 @@
  * Handles authentication and token management.
  */
 import { request } from 'undici';
+import { getJingmeRuntime } from './runtime.js';
 // API domain mapping
 const API_DOMAINS = {
     prod: 'http://openme.jd.local',
@@ -36,7 +37,7 @@ async function getAccessToken(account) {
     const cached = tokenCache.get(cacheKey_);
     const now = Date.now();
     if (cached && cached.expiresAt > now + 60000) {
-        console.debug(`[jingme-client] cached: ${cached.token}`);
+        getJingmeRuntime().logger.debug(`[jingme-client] cached: ${cached.token}`);
         return cached.token;
     }
     const domain = getApiDomain(account.environment);

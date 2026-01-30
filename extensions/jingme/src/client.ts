@@ -7,6 +7,7 @@
 
 import { request } from 'undici';
 import type { ResolvedJingmeAccount, TokenResponse } from './types.js';
+import { getJingmeRuntime } from './runtime.js';
 
 // API domain mapping
 const API_DOMAINS = {
@@ -45,7 +46,7 @@ async function getAccessToken(account: ResolvedJingmeAccount): Promise<string> {
   const now = Date.now();
 
   if (cached && cached.expiresAt > now + 60000) {
-    console.debug(`[jingme-client] cached: ${cached.token}`);
+    getJingmeRuntime().logger.debug(`[jingme-client] cached: ${cached.token}`);
     return cached.token;
   }
 

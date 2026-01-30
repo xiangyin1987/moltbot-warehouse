@@ -66,7 +66,6 @@ function resolveAccount(
 ): ResolvedJingmeAccount | null {
   const channelConfig = getChannelConfig(cfg);
   const accountConfig = getAccountConfig(channelConfig, accountId);
-
   // Resolve credentials - env vars as fallback for default account
   const isDefault = accountId === 'default';
   const appKey =
@@ -211,17 +210,26 @@ async function listGroups(
   try {
     const client = createJingmeClient(account);
 
+    const requestId = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+
     const response = await client.post(
       '/open-api/suite/v1/timline/getRobotGroup',
       {
-        robotId: account.robotId,
+        appId: account.appKey,
+        params: {
+          pageNo: 1,
+          pageSize: 200,
+          robotId: account.robotId,
+        },
+        requestId,
+        dateTime: Date.now(),
       },
     );
 
-    if (response.data.code === 1 && Array.isArray(response.data.data)) {
-      const groups = response.data.data.map((group: any) => ({
-        id: group.gid || '',
-        name: group.groupName || 'Unknown',
+    if (response.data.code === 0 && Array.isArray(response.data.data.groups)) {
+      const groups = response.data.data.groups.map((group: any) => ({
+        id: group.groupId || '',
+        name: group.name || 'Unknown',
       }));
       return groups;
     }

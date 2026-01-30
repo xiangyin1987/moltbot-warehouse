@@ -43,7 +43,7 @@ export interface ResolvedJingmeAccount {
   appKey: string;
   appSecret: string;
   robotId: string;
-   openTeamId: string;
+  openTeamId: string;
   environment: JingmeEnvironment;
   webhookPort: number;
   verificationToken?: string;
@@ -98,6 +98,7 @@ export interface JingmeEvent {
   msgId: string; // 消息 ID
   body: JingmeMessageBody;
   chatType: number; // 聊天类型: 1 = 单聊, 2 = 群聊
+  groupId?: string; // 群 ID (if chatType is 2)
 }
 
 /**
