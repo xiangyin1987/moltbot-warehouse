@@ -90,6 +90,7 @@ export interface JingmeEvent {
     msgId: string;
     body: JingmeMessageBody;
     chatType: number;
+    groupId?: string;
 }
 /**
  * JingMe message event from webhook callback

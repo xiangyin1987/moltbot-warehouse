@@ -53,6 +53,7 @@ async function routeMessage(message, account) {
     const chatType = message.event.chatType === 1 ? 'direct' : 'group';
     const sessionId = message.event.body.requestData?.sessionId;
     const senderId = message.event.sender.pin;
+    const groupId = message.event.groupId;
     api.logger.info(`[jingme] Received message from ${senderId} in ${chatType} ${sessionId}`);
     try {
         // Build JingMe-specific identifiers
@@ -105,7 +106,8 @@ async function routeMessage(message, account) {
                 if (!replyText.trim())
                     return;
                 const sessionType = chatType === 'direct' ? 1 : 2;
-                await sendTextMessage(account, senderId, sessionType, replyText);
+                const sessionId = chatType === 'direct' ? senderId : groupId;
+                await sendTextMessage(account, sessionId, sessionType, replyText);
             },
             async waitForIdle() {
                 // No buffering, messages sent immediately
