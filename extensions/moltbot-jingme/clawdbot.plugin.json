@@ -1,5 +1,5 @@
 {
-  "id": "@jd/moltbot-jingme",
+  "id": "moltbot-jingme",
   "channels": ["jingme"],
   "configSchema": {
     "type": "object",

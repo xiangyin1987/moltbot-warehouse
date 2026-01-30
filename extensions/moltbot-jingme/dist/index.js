@@ -14,7 +14,7 @@ export { createJingmeClient } from './src/client.js';
 export { startWebhookServer } from './src/webhook.js';
 export { monitorJingmeProvider, stopMonitor } from './src/monitor.js';
 const plugin = {
-    id: '@jd/moltbot-jingme',
+    id: 'moltbot-jingme',
     name: 'JingMe',
     description: 'JingMe (京ME) channel plugin for Moltbot',
     configSchema: emptyPluginConfigSchema(),

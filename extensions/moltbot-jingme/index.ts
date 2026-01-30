@@ -28,7 +28,7 @@ export type {
 } from './src/types.js';
 
 const plugin = {
-  id: '@jd/moltbot-jingme',
+  id: 'moltbot-jingme',
   name: 'JingMe',
   description: 'JingMe (京ME) channel plugin for Moltbot',
   configSchema: emptyPluginConfigSchema(),
